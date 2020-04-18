@@ -1,0 +1,23 @@
+Goal of the tool
+   Translate VCD to Wavedrom
+      Option through JSON:
+         Select instance level in the VCD
+         Select which signals to display
+         Select renaming of signals
+         Select clks
+         Select from how many clock ticks without activity to ellipse -> Select signals to track the activity ?
+         Select the time window where to generate the diagram
+
+
+         Get start_time
+            Compute list offset for each signal where to start registering activity
+            Specify window in time to generate new data structure
+            Collapse buses in single nets
+
+
+         For Wavedrom -> Need to generate array indexed on clock edge
+
+
+   Translate VCD to Testbench verilog
+      Option through JSON
+         Select which instance to generate the bench for faster sims ?
