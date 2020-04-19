@@ -21,7 +21,7 @@ class Vcd2Wave(object):
 
         self.vcd_name       = vcd_name
         self.vcd_signals    = []
-        self.vcd_signal_keys = {}
+        self.vcd_signal_map = {}
         self.vcd            = None
         self.win_tv         = {}
         time_re = re.compile(r"(?P<value>[\d\.]+)(?P<unit>\w+)")
@@ -67,8 +67,7 @@ class Vcd2Wave(object):
 
         return self.vcd_signals
 
-    def parse_vcd(self):
-        self.vcd = parse_vcd(self.vcd_name, siglist=self.vcd_signals, opt_timescale=self.timeunit)
+    def gen_signal_map(self):
         for k in self.vcd:
             for net in self.vcd[k]["nets"]:
                 if self.cfg["clk_name"] == net["name"]:
@@ -77,9 +76,13 @@ class Vcd2Wave(object):
                     for s in self.cfg["filter"]:
                         # Normally no need to filter on hier since we already did it previously
                         if s == net["name"]:
-                            self.vcd_signal_keys[k] = str(s)
+                            self.vcd_signal_map[k] = str(s)
                             break
 
+
+    def parse_vcd(self):
+        self.vcd = parse_vcd(self.vcd_name, siglist=self.vcd_signals, opt_timescale=self.timeunit)
+        self.gen_signal_map()
             # print(k)
             # print(self.vcd[k]["nets"][0]["name"])
             # print(self.vcd[k])
@@ -88,6 +91,80 @@ class Vcd2Wave(object):
         # print(self.vcd)
 
     # Collapse buses ?
+    def collapse_bus_vcd(self):
+        new_vcd = {}
+        bus_map = {}
+        # Sort keys of the same bus
+        for s in self.cfg["filter"]:
+            busregex = re.compile(r"%s(\[(?P<bit_nb>\d+)\])+" % s)
+            for k in self.vcd:
+                for net in self.vcd[k]["nets"]:
+                    if busregex.match(net["name"]):
+                        bit_nb = busregex.match(net["name"]).group("bit_nb")
+                        # Part of a bus
+                        if s not in bus_map:
+                            bus_map[s] = {}
+
+                        # Sort by bit_nb ?
+                        bus_map[s][k] = (int(bit_nb), net["name"])
+
+        print(bus_map)
+        bus_w = len(bus_map[s])
+        # Merge t,v
+        tv = {}
+        for s in bus_map:
+            tv[s] = []
+            # Binary format
+            bus = [""] * bus_w
+            signals_idx = {}
+            t = 0
+            # Init values
+            for k in bus_map[s]:
+                signals_idx[k] = 0
+                bus[bus_map[s][k][0]] = self.vcd[k]["tv"][0][self.VAL_IDX]
+
+            for k in signals_idx:
+                if k in bus_map[s]:
+                    if signals_idx[k] + 1 >= len(self.vcd[k]["tv"]):
+                        del bus_map[s][k]
+                        del self.vcd[k]
+                        free_vcd_k = k
+
+            tv[s].append((t, "".join(bus)))
+
+            while len(bus_map[s]):
+
+                # Get keys with next time value
+                d = {k: self.vcd[k]["tv"][signals_idx[k] + 1][self.TIME_IDX] for k in bus_map[s]}
+                t = min(d.values())
+                # min_ks = min(d, key=d.get)
+                min_ks = [key for key in d if d[key] == t]
+
+                print("Minimum keys {}".format(min_ks))
+
+                # Progress time for keys with the next value
+                for k in min_ks:
+                    signals_idx[k] += 1
+                    bus[bus_map[s][k][0]] = self.vcd[k]["tv"][signals_idx[k]][self.VAL_IDX]
+
+                # Remove keys in bus_maps if constant
+                for k in signals_idx:
+                    if k in bus_map[s]:
+                        if signals_idx[k] + 1 >= len(self.vcd[k]["tv"]):
+                            del bus_map[s][k]
+                            del self.vcd[k]
+                            free_vcd_k = k
+
+
+                # t = self.vcd[min_ks[0]]["tv"][signals_idx[min_ks[0]]][self.TIME_IDX]
+                tv[s].append((t, hex(int("".join(reversed(bus)), 2))))
+                # tv[s].append((t, ("".join(bus), 2)))
+
+            print(tv)
+            self.vcd[free_vcd_k] = {"tv": tv[s], "nets": [{"hier": self.cfg["inst_name"], "name": s, "type": "wire", "size": str(bus_w)}]}
+            print(self.vcd)
+
+        self.gen_signal_map()
 
     def window_vcd(self):
         self.win_tv = {}
@@ -123,29 +200,30 @@ class Vcd2Wave(object):
                 self.win_tv[k] = [(self.start_time, self.vcd[k]["tv"][-1][self.VAL_IDX])]
 
         for k in self.win_tv:
-            if k in self.vcd_signal_keys:
-                print(self.vcd_signal_keys[k])
+            if k in self.vcd_signal_map:
+                print(self.vcd_signal_map[k])
             else:
                 print(self.cfg["clk_name"])
             print(self.win_tv[k])
         # print(self.clock_symb)
-        # print(self.vcd_signal_keys)
+        # print(self.vcd_signal_map)
 
     def gen_wavedrom_array(self):
         self.wavedrom = {}
+        # Wavedrom keys should be signal maps
         self.clock_edge_cnt = 0
         signals_idx = {}
-        for k in self.vcd_signal_keys.keys():
+        for k in self.vcd_signal_map.keys():
             signals_idx[k] = 0
             self.wavedrom[k] = []
-        # signals_idx = {f:0 for f in self.vcd_signal_keys.keys()}
+        # signals_idx = {f:0 for f in self.vcd_signal_map.keys()}
         # Loop over clock times
         for i, (t, v) in enumerate(self.win_tv[self.clock_symb]):
             if v == "1":
                 self.clock_edge_cnt += 1
                 # self.wavedrom.append({})
                 # Iterate over signals
-                for s_k in self.vcd_signal_keys.keys():
+                for s_k in self.vcd_signal_map.keys():
                     # print(s_k)
                     if signals_idx[s_k] >= 0:
                         # Progress in time
@@ -168,7 +246,7 @@ class Vcd2Wave(object):
         print(self.wavedrom)
 
     def dump_wavedrom(self):
-        # print(self.vcd_signal_keys)
+        # print(self.vcd_signal_map)
         indent = ""
         clk = "P"
         for i in range(self.clock_edge_cnt - 1):
@@ -198,7 +276,7 @@ class Vcd2Wave(object):
 
                 f.write(indent + "{\n")
                 indent += " " * 2
-                f.write(indent + "\"name\": \"%s\",\n" % self.vcd_signal_keys[k])
+                f.write(indent + "\"name\": \"%s\",\n" % self.vcd_signal_map[k])
                 f.write(indent + "\"wave\": \"%s\"\n" % wave)
                 indent = indent[:-2]
                 f.write(indent + "},\n")
@@ -232,6 +310,7 @@ def main(argv):
     wavegen = Vcd2Wave(args.configfile, args.input)
     wavegen.vcd_sig_list_gen()
     wavegen.parse_vcd()
+    wavegen.collapse_bus_vcd()
     wavegen.window_vcd()
     wavegen.gen_wavedrom_array()
     wavegen.dump_wavedrom()
