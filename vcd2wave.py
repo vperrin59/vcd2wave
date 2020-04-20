@@ -1,5 +1,4 @@
-#
-
+# REVISIT: implement idle times
 import sys
 import os
 import json
@@ -35,7 +34,7 @@ class Vcd2Wave(object):
         self.VAL_IDX = 1
         self.wavedrom = []
         self.clock_edge_cnt = 0
-        self.bus_format = "b"
+        self.bus_format = "h"
     # def collapse_bus_sigs(self, sigs):
     #     clps_sigs = set()
     #     for s in sigs:
@@ -140,10 +139,10 @@ class Vcd2Wave(object):
                         bus_map[s][k] = (int(bit_nb), net["name"])
 
         print(bus_map)
-        bus_w = len(bus_map[s])
         # Merge t,v
         tv = {}
         for s in bus_map:
+            bus_w = len(bus_map[s])
             tv[s] = []
             # Binary format
             bus = [""] * bus_w
@@ -283,6 +282,16 @@ class Vcd2Wave(object):
     def remove_last_comma(self, s):
         return s[:-2] + "\n"
 
+    def open_bracket(self, indent):
+        s = indent + "{\n"
+        new_indent = indent + " " * 2
+        return (s , new_indent)
+
+    def close_bracket(self, indent):
+        new_indent = indent[:-2]
+        s = new_indent + "},\n"
+        return (s, new_indent)
+
     def dump_wavedrom(self):
         # print(self.vcd_signal_map)
         indent = ""
@@ -290,17 +299,19 @@ class Vcd2Wave(object):
         for i in range(self.clock_edge_cnt - 1):
             clk += "."
         with open ("test.drom.json", "w") as f:
-            f.write(indent + "{\n")
-            indent += " " * 2
+            text = ""
+            (text, indent) = self.open_bracket(indent)
+            f.write(text)
+
             f.write(indent + "\"signal\": [\n")
             indent += " " * 2
             ############# Clock
-            f.write(indent + "{\n")
-            indent += " " * 2
+            (text, indent) = self.open_bracket(indent)
+            f.write(text)
             f.write(indent + "\"name\": \"%s\",\n" % self.cfg["clk_name"])
             f.write(indent + "\"wave\": \"%s\"\n" % clk)
-            indent = indent[:-2]
-            f.write(indent + "},\n")
+            (text, indent) = self.close_bracket(indent)
+            f.write(text)
             ############## Signals
             text = ""
             for k in self.wavedrom:
@@ -341,21 +352,20 @@ class Vcd2Wave(object):
             text = self.remove_last_comma(text)
             f.write(text)
             indent = indent[:-2]
-            f.write(indent + "]\n")
-            indent = indent[:-2]
-            f.write(indent + "}\n")
+            f.write(indent + "],\n")
 
-# def vcd2wavedrom():
-#     vcd = parse_vcd(config['input'])
-#     timescale = int(re.match(r'(\d+)', get_timescale()).group(1))
-#     vcd_dict = {}
-#     for i in vcd:
-#         vcd_dict[vcd[i]['nets'][0]['hier']+'.'+vcd[i]['nets'][0]['name']] = \
-#             vcd[i]['tv']
+            ## Config
+            f.write(indent + "\"config\": {\n")
+            indent += " " * 2
+            f.write(indent + "\"hscale\": 1\n")
 
-#     homogenize_waves(vcd_dict, timescale)
-#     dump_wavedrom(vcd_dict, timescale)
+            (text, indent) = self.close_bracket(indent)
+            text = self.remove_last_comma(text)
+            f.write(text)
 
+            (text, indent) = self.close_bracket(indent)
+            text = self.remove_last_comma(text)
+            f.write(text)
 
 def main(argv):
     parser = argparse.ArgumentParser(description='Transform VCD to wavedrom')
