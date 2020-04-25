@@ -1,0 +1,23 @@
+{
+    "inst_name": "tb",
+    "signals": [
+        "clk",
+        "rstn",
+        "start",
+        "cmd",
+        "ready",
+        "done"
+    ],
+    "signal_maps": {
+        "cmd": {
+            "0": "CMD_A",
+            "1": "CMD_B",
+            "2": "CMD_C",
+            "3": "CMD_D",
+        }
+    },
+    "max_idle": 5,
+    "start_time": "0ns",
+    "end_time": "200ns",
+    "clk_name": "clk"
+}
