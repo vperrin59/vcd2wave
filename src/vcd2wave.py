@@ -1,4 +1,3 @@
-# REVISIT: implement idle times
 import sys
 import os
 import argparse
@@ -41,16 +40,13 @@ class Vcd2Wave(object):
         self.clock_edge_cnt = 0
         self.bus_format = "h"
 
-    def get_start_time(self):
-        pass
-
     def vcd_sig_list_gen(self):
         # First filter ref_signals on inst_name
         ref_signals = list_sigs(self.vcd_name)
         ref_signals = [x for x in ref_signals if self.cfg["inst_name"] in x]
         # print(ref_signals)
         # print(self.cfg)
-        for s in self.cfg["filter"]:
+        for s in self.cfg["signals"]:
             matches = 0
             full_name = self.cfg["inst_name"] + "." + s
 
@@ -71,7 +67,7 @@ class Vcd2Wave(object):
                 if self.cfg["clk_name"] == net["name"]:
                     self.clock_symb = k
                 else:
-                    for s in self.cfg["filter"]:
+                    for s in self.cfg["signals"]:
                         # Normally no need to filter on hier since we already did it previously
                         # Handle buses here
                         # if s in net["name"]:
@@ -127,7 +123,7 @@ class Vcd2Wave(object):
         new_vcd = {}
         bus_map = {}
         # Sort keys of the same bus
-        for s in self.cfg["filter"]:
+        for s in self.cfg["signals"]:
             busregex = re.compile(r"%s(\[(?P<bit_nb>\d+)\])+" % s)
             for k in self.vcd:
                 for net in self.vcd[k]["nets"]:
@@ -270,7 +266,6 @@ class Vcd2Wave(object):
                                 break
 
                         # print("Found time match clock %d signal %d" % (i, signals_idx[s_k]))
-                    # REVISIT: Handle the case where signal is constant
                     # print("Time clock %f signal %f" % (t, self.win_tv[s_k][signals_idx[s_k]][self.TIME_IDX]))
                     if signals_idx[s_k] < 0:
                         self.wavedrom[s_k].append(self.vcd[s_k]["tv"][-1][self.VAL_IDX])
@@ -332,19 +327,19 @@ class Vcd2Wave(object):
 
     def bus_wavedrom_replace(self, key, bus_data):
         # REVISIT: Check the type of bus_data, for now assume binary
-        if self.vcd_signal_map[key] in self.cfg["replace"]:
-            return self.cfg["replace"][self.vcd_signal_map[key]][str(int(bus_data, 2))]
+        if self.vcd_signal_map[key] in self.cfg["signal_maps"]:
+            return self.cfg["signal_maps"][self.vcd_signal_map[key]][str(int(bus_data, 2))]
         else:
             return bus_data
 
 
-    def dump_wavedrom(self):
+    def dump_wavedrom(self, outfname):
         # print(self.vcd_signal_map)
         indent = ""
         clk = "P"
         for i in range(self.clock_edge_cnt - 1):
             clk += "."
-        with open ("test.drom.json", "w") as f:
+        with open (outfname, "w") as f:
             text = ""
             (text, indent) = self.open_bracket(indent)
             f.write(text)
@@ -429,8 +424,7 @@ def main(argv):
     wavegen.window_vcd()
     wavegen.gen_wavedrom_array()
     wavegen.filter_wavedrom_array()
-    wavegen.dump_wavedrom()
-    # vcd2wavedrom()
+    wavegen.dump_wavedrom(args.output)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
