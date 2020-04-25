@@ -1,10 +1,10 @@
 # REVISIT: implement idle times
 import sys
 import os
-import json
 import argparse
 import re
 import math
+import yaml
 
 from Verilog_VCD import parse_vcd
 from Verilog_VCD import get_timescale
@@ -16,8 +16,9 @@ class Vcd2Wave(object):
     # Check end_time is in the VCD
     def __init__(self, cfg_name, vcd_name):
         self.cfg = {}
-        with open(cfg_name) as json_file:
-            self.cfg.update(json.load(json_file))
+        # Read YAML file
+        with open(cfg_name, 'r') as cfg_file:
+            self.cfg.update(yaml.safe_load(cfg_file))
 
         self.vcd_name       = vcd_name
         self.vcd_signals    = []
@@ -32,18 +33,13 @@ class Vcd2Wave(object):
         self.clock_symb = None
         self.TIME_IDX = 0
         self.VAL_IDX = 1
-        self.wavedrom = []
+        # Dictionary indexed by signal keys
+        # Each key contains the list of values for each clock edge
+        # All the list should have the same length
+        self.wavedrom = {}
+        # It's the length of the lists in self.wavedrom
         self.clock_edge_cnt = 0
         self.bus_format = "h"
-    # def collapse_bus_sigs(self, sigs):
-    #     clps_sigs = set()
-    #     for s in sigs:
-    #         if "[" in s:
-    #             bus_sig = s.split("[")[0]
-    #             clps_sigs.add(bus_sig)
-    #         else:
-    #             clps_sigs.add(s)
-    #     return clps_sigs
 
     def get_start_time(self):
         pass
@@ -62,6 +58,7 @@ class Vcd2Wave(object):
             for ref_s in ref_signals:
                 if busregex.match(ref_s):
                     matches += 1
+                    print("%s matched %s" % (s, ref_s))
                     self.vcd_signals.append(ref_s)
                     # Don't break because there could be multiple matches
             assert(matches > 0), full_name + " not in ref_signals"
@@ -76,7 +73,12 @@ class Vcd2Wave(object):
                 else:
                     for s in self.cfg["filter"]:
                         # Normally no need to filter on hier since we already did it previously
-                        if s == net["name"]:
+                        # Handle buses here
+                        # if s in net["name"]:
+                            # print("%s should match %s" % (s, net["name"]))
+                        busregex = re.compile(r"%s(\[\d+\])*" % s)
+                        if busregex.match(net["name"]):
+                        # if s == net["name"]:
                             self.vcd_signal_map[k] = str(s)
                             break
 
@@ -279,6 +281,42 @@ class Vcd2Wave(object):
         print(self.wavedrom)
 
 
+    def filter_wavedrom_array(self):
+        max_idle_clk_cnt = 5
+        new_clock_edge_cnt = 0
+        new_wavedrom = {k: [] for k in self.wavedrom}
+        idle_cnt     = {k: 0 for k in self.wavedrom}
+        prev_val     = {k: "unknown" for k in self.wavedrom}
+        # Detect from an index if there is no change, then generate ellipse symbol
+
+        time_idx_ellipsed = []
+
+        print("Filter Wavedrom array")
+
+        for time_idx in range(self.clock_edge_cnt):
+            ellipse_en = True
+            for k in self.wavedrom:
+                if self.wavedrom[k][time_idx] == prev_val[k]:
+                    idle_cnt[k] += 1
+                else:
+                    idle_cnt[k] = 0
+                    prev_val[k] = self.wavedrom[k][time_idx]
+
+                if idle_cnt[k] <= max_idle_clk_cnt:
+                    ellipse_en = False
+
+            if ellipse_en:
+                time_idx_ellipsed.append(time_idx)
+                print("Ellipsed index %d" % time_idx)
+            else:
+                new_clock_edge_cnt += 1
+                for k in self.wavedrom:
+                    new_wavedrom[k].append(self.wavedrom[k][time_idx])
+
+        self.wavedrom = new_wavedrom
+        self.clock_edge_cnt = new_clock_edge_cnt
+
+
     def remove_last_comma(self, s):
         return s[:-2] + "\n"
 
@@ -291,6 +329,14 @@ class Vcd2Wave(object):
         new_indent = indent[:-2]
         s = new_indent + "},\n"
         return (s, new_indent)
+
+    def bus_wavedrom_replace(self, key, bus_data):
+        # REVISIT: Check the type of bus_data, for now assume binary
+        if self.vcd_signal_map[key] in self.cfg["replace"]:
+            return self.cfg["replace"][self.vcd_signal_map[key]][str(int(bus_data, 2))]
+        else:
+            return bus_data
+
 
     def dump_wavedrom(self):
         # print(self.vcd_signal_map)
@@ -336,7 +382,7 @@ class Vcd2Wave(object):
                     text += indent + "\"data\": [\n"
                     indent += " " * 2
                     for d in bus_data:
-                        text += indent + "\"%s\",\n" % d
+                        text += indent + "\"%s\",\n" % self.bus_wavedrom_replace(k, d)
                         # f.write(indent + "\"%s\",\n" % d)
 
                     text = self.remove_last_comma(text)
@@ -382,6 +428,7 @@ def main(argv):
     wavegen.collapse_bus_vcd()
     wavegen.window_vcd()
     wavegen.gen_wavedrom_array()
+    wavegen.filter_wavedrom_array()
     wavegen.dump_wavedrom()
     # vcd2wavedrom()
 
